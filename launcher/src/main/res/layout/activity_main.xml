@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Layout de DosConsoleActivity. El contenedor exterior es
+    AspectRatioFrameLayout: fuerza que la consola siempre se vea en
+    16:9 (con franjas negras a los lados si el teléfono es más
+    angosto/ancho que eso), pensado para grabar el tráiler con una
+    proporción consistente sin importar el dispositivo.
+-->
+<FrameLayout 
+    xmlns:android="http://schemas.android.com/apk/res/android" 
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+    
+    <com.keylerperales07.projectmountains.launcher.AspectRatioFrameLayout
+        xmlns:android="http://schemas.android.com/apk/res/android"
+        android:id="@+id/aspectRatioContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center"
+        android:background="#000000">
+
+        <EditText
+            android:id="@+id/consoleView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#000000"
+            android:textColor="#33FF33"
+            android:textSize="14sp"
+            android:gravity="top|start"
+            android:inputType="textMultiLine|textNoSuggestions"
+            android:singleLine="false"
+            android:imeOptions="flagNoExtractUi" />
+
+    </com.keylerperales07.projectmountains.launcher.AspectRatioFrameLayout>
+</FrameLayout>
