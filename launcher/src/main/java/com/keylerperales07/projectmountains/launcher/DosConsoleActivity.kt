@@ -34,7 +34,7 @@ import com.keylerperales07.projectmountains.resimdos.runtime.shell.ShellContext
 import java.util.Calendar
 
 /**
- * Consola de ReSim DOS 1.25 como una sola caja de texto continua (sin
+ * Consoola de MS-DOS 1.25 como una sola caja de texto continua (sin
  * campo de entrada separado abajo): la fecha/hora se escriben solas,
  * con animacion letra por letra, usando la fecha/hora real del
  * dispositivo, y despues el usuario escribe pegado al prompt "A>",
