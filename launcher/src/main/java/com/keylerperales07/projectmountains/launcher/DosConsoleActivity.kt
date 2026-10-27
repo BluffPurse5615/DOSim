@@ -19,7 +19,6 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
-import android.widget.EditText
 import com.keylerperales07.projectmountains.resimcore.ReSimCore
 import com.keylerperales07.projectmountains.resimdos.boot.BootSequence
 import com.keylerperales07.projectmountains.resimdos.fs.VirtualFileSystemException
@@ -29,12 +28,13 @@ import com.keylerperales07.projectmountains.resimdos.runtime.ProgramLoader
 import com.keylerperales07.projectmountains.resimdos.runtime.ProgramRegistry
 import com.keylerperales07.projectmountains.resimdos.runtime.RuntimeExecutionException
 import com.keylerperales07.projectmountains.resimdos.runtime.shell.CommandInterpreter
+import com.keylerperales07.projectmountains.resimdos.runtime.shell.CommandResult
 import com.keylerperales07.projectmountains.resimdos.runtime.shell.DosClockFormat
 import com.keylerperales07.projectmountains.resimdos.runtime.shell.ShellContext
 import java.util.Calendar
 
 /**
- * Consoola de MS-DOS 1.25 como una sola caja de texto continua (sin
+ * Consola de ReSim DOS 1.25 como una sola caja de texto continua (sin
  * campo de entrada separado abajo): la fecha/hora se escriben solas,
  * con animacion letra por letra, usando la fecha/hora real del
  * dispositivo, y despues el usuario escribe pegado al prompt "A>",
@@ -42,22 +42,24 @@ import java.util.Calendar
  */
 class DosConsoleActivity : Activity() {
 
-    private lateinit var consoleView: EditText
+    private lateinit var consoleView: LockedScrollEditText
     private lateinit var shellContext: ShellContext
     private lateinit var interpreter: CommandInterpreter
     private lateinit var programLoader: ProgramLoader
 
     private val handler = Handler(Looper.getMainLooper())
 
-    /** Posicion a partir de la cual el texto es "editable" (lo que va despues del 煤ltimo prompt). */
+    /** Posicion a partir de la cual el texto es "editable" (lo que va despues del último prompt). */
     private var promptStart = 0
     /** Copia exacta de todo el texto hasta promptStart; si algo la corrompe, se restaura. */
     private var lockedText = ""
     private var isReady = false
     /** Si DATE o TIME estan esperando que la siguiente linea sea el valor nuevo. */
     private var pendingClockField: String? = null
-    /** Si PAUSE está esperando que el usuario mande cualquier línea para continuar. */
+    /** Si PAUSE (o una salida paginada) está esperando que el usuario mande cualquier línea para continuar. */
     private var pendingKeyPress = false
+    /** Líneas de una salida paginada (DIR /P) que todavía no se mostraron. */
+    private val pendingLines = ArrayDeque<String>()
     /** Evita que nuestros propios appends disparen el detector de "Enter" del usuario. */
     private var guard = false
 
@@ -112,7 +114,7 @@ class DosConsoleActivity : Activity() {
                 window.insetsController?.let { controller ->
                     controller.hide(WindowInsets.Type.systemBars())
                     controller.systemBarsBehavior =
-                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 }
             } catch (e: Exception) {
                 // Pantalla completa es cosmético: si el fabricante rompe esta API, no debe tumbar la app.
@@ -120,13 +122,13 @@ class DosConsoleActivity : Activity() {
         } else {
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility = (
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_FULLSCREEN
-            )
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            or View.SYSTEM_UI_FLAG_FULLSCREEN
+                    )
         }
     }
 
@@ -163,7 +165,7 @@ class DosConsoleActivity : Activity() {
 
     private fun setupUi() {
         setContentView(R.layout.activity_main)
-        consoleView = findViewById(R.id.consoleView)
+        consoleView = findViewById<LockedScrollEditText>(R.id.consoleView)
         consoleView.typeface = dosTypeface
         consoleView.setTextSize(TypedValue.COMPLEX_UNIT_PX, computeConsoleTextSizePx())
         // Antes de arrancar no se puede escribir: evita que el usuario
@@ -172,31 +174,31 @@ class DosConsoleActivity : Activity() {
         consoleView.isFocusableInTouchMode = false
 
         consoleView.addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
 
-                override fun afterTextChanged(s: Editable) {
-                    if (!isReady || guard) return
+            override fun afterTextChanged(s: Editable) {
+                if (!isReady || guard) return
 
-                    if (s.length < promptStart || !s.toString().startsWith(lockedText)) {
-                        // Se borró o modificó el historial/el prompt: se restaura tal como estaba.
-                        guard = true
-                        s.replace(0, s.length, lockedText)
-                        guard = false
-                        scrollToBottom()
-                        return
-                    }
-
-                    val editableRegion = s.substring(promptStart)
-                    val newlineIndex = editableRegion.indexOf('\n')
-                    if (newlineIndex >= 0) {
-                        val typed = editableRegion.substring(0, newlineIndex)
-                        guard = true
-                        s.delete(promptStart + newlineIndex, s.length)
-                        guard = false
-                        handleSubmittedLine(typed)
-                    }
+                if (s.length < promptStart || !s.toString().startsWith(lockedText)) {
+                    // Se borró o modificó el historial/el prompt: se restaura tal como estaba.
+                    guard = true
+                    s.replace(0, s.length, lockedText)
+                    guard = false
+                    scrollToBottom()
+                    return
                 }
+
+                val editableRegion = s.substring(promptStart)
+                val newlineIndex = editableRegion.indexOf('\n')
+                if (newlineIndex >= 0) {
+                    val typed = editableRegion.substring(0, newlineIndex)
+                    guard = true
+                    s.delete(promptStart + newlineIndex, s.length)
+                    guard = false
+                    handleSubmittedLine(typed)
+                }
+            }
         })
     }
 
@@ -283,7 +285,12 @@ class DosConsoleActivity : Activity() {
         try {
             if (pendingKeyPress) {
                 pendingKeyPress = false
-                printPromptRaw()
+                if (pendingLines.isNotEmpty()) {
+                    showNextPage()
+                    if (pendingLines.isNotEmpty()) pendingKeyPress = true else printPromptRaw()
+                } else {
+                    printPromptRaw()
+                }
                 return
             }
 
@@ -317,12 +324,19 @@ class DosConsoleActivity : Activity() {
                 return
             }
 
+            shellContext.screenRows = visibleRows()
             val result = interpreter.execute(typed)
 
             if (result.clearScreen) {
+                consoleView.releaseScrollLock()
                 consoleView.setText("")
             } else {
                 result.output.forEach { appendLineRaw(it) }
+                if (result.pendingLines.isNotEmpty()) {
+                    pendingLines.clear()
+                    pendingLines.addAll(result.pendingLines)
+                    appendLineRaw(CommandResult.PRESS_KEY_PROMPT)
+                }
                 if (result.isError) {
                     val commandName = typed.trim().substringBefore(' ')
                     tryRunAsProgram(commandName, typed, result.errorMessage)
@@ -342,7 +356,7 @@ class DosConsoleActivity : Activity() {
         }
     }
 
-    /** Si COMMAND.COM no reconoci贸 la l铆nea como comando interno, se busca por PATH y se prueba como programa. */
+    /** Si COMMAND.COM no reconoció la línea como comando interno, se busca por PATH y se prueba como programa. */
     private fun tryRunAsProgram(commandName: String, fullLine: String, originalError: String?) {
         val args = fullLine.trim().split(Regex("\\s+")).drop(1)
 
@@ -363,6 +377,20 @@ class DosConsoleActivity : Activity() {
         } catch (e: RuntimeExecutionException) {
             appendLineRaw(e.message ?: "Error al ejecutar $commandName")
         }
+    }
+
+    /** Filas de texto que caben ahora mismo en la consola; DIR /P pagina con este número. */
+    private fun visibleRows(): Int {
+        val usableHeight = consoleView.height - consoleView.totalPaddingTop - consoleView.totalPaddingBottom
+        val rowHeight = consoleView.lineHeight
+        return if (usableHeight <= 0 || rowHeight <= 0) 25 else usableHeight / rowHeight
+    }
+
+    /** Suelta la siguiente página de una salida paginada; si aún queda más, vuelve a pedir tecla. */
+    private fun showNextPage() {
+        val pageRows = (shellContext.screenRows - 2).coerceAtLeast(1)
+        repeat(minOf(pageRows, pendingLines.size)) { appendLineRaw(pendingLines.removeFirst()) }
+        if (pendingLines.isNotEmpty()) appendLineRaw(CommandResult.PRESS_KEY_PROMPT)
     }
 
     private fun promptText(): String = "${shellContext.drive.driveLetter}:"
