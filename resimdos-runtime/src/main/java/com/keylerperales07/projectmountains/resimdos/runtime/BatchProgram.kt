@@ -49,6 +49,8 @@ internal class BatchProgram(
 
             val result = interpreter.execute(line)
             result.output.forEach { context.writeLine(it) }
+            // Un .BAT no puede pulsar teclas: lo que DIR /P dejaría en pausa sale de corrido.
+            result.pendingLines.forEach { context.writeLine(it) }
 
             if (result.isError) {
                 if (!tryRunAsProgram(line, context)) {
