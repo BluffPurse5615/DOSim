@@ -12,10 +12,13 @@ import com.keylerperales07.projectmountains.resimdos.fs.VirtualPath
 class ShellContext(val drive: VirtualDrive) {
 
     var currentDirectory: String = VirtualPath.ROOT
-    private set
+        private set
 
     val environment: MutableMap<String, String> = mutableMapOf()
     val clock: DosClock = DosClock()
+
+    /** Filas de texto que caben en pantalla; la UI lo actualiza antes de cada comando (DIR /P pagina con esto). */
+    var screenRows: Int = 25
 
     fun changeDirectory(newDirectory: String) {
         currentDirectory = newDirectory
@@ -25,8 +28,8 @@ class ShellContext(val drive: VirtualDrive) {
     fun resolvePath(argument: String): String {
         val trimmed = argument.trim()
         val isAbsolute = trimmed.startsWith("\\") ||
-        trimmed.startsWith("/") ||
-        (trimmed.length >= 2 && trimmed[1] == ':')
+                trimmed.startsWith("/") ||
+                (trimmed.length >= 2 && trimmed[1] == ':')
 
         val combined = when {
             isAbsolute -> trimmed
