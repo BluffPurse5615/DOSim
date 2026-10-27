@@ -6,12 +6,12 @@
     angosto/ancho que eso), pensado para grabar el tráiler con una
     proporción consistente sin importar el dispositivo.
 -->
-<FrameLayout 
-    xmlns:android="http://schemas.android.com/apk/res/android" 
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#000000">
-    
+
     <com.keylerperales07.projectmountains.launcher.AspectRatioFrameLayout
         xmlns:android="http://schemas.android.com/apk/res/android"
         android:id="@+id/aspectRatioContainer"
@@ -20,7 +20,7 @@
         android:layout_gravity="center"
         android:background="#000000">
 
-        <EditText
+        <com.keylerperales07.projectmountains.launcher.LockedScrollEditText
             android:id="@+id/consoleView"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
