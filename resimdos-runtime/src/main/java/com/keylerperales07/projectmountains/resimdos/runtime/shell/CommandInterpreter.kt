@@ -1,11 +1,17 @@
 package com.keylerperales07.projectmountains.resimdos.runtime.shell
 
+import com.keylerperales07.projectmountains.resimdos.fs.VirtualFileSystemException
+
 /**
  * COMMAND.COM: recibe una línea escrita por el usuario, la separa en
  * comando + argumentos (respetando comillas) y ejecuta el [Command]
  * correspondiente sobre el [ShellContext]. DOS 1.25 no tiene SET ni
  * variables de entorno de usuario, así que no hay expansión de
  * %VARIABLES% aquí (eso llegó con versiones posteriores de DOS).
+ *
+ * Los errores de uso y los del sistema de archivos que lance un
+ * comando se convierten aquí en un CommandResult de error, para que
+ * ninguno llegue a tumbar la consola.
  */
 class CommandInterpreter(private val context: ShellContext) {
 
@@ -30,17 +36,28 @@ class CommandInterpreter(private val context: ShellContext) {
         val (commandTokens, redirection) = extractRedirection(tokenize(trimmed))
         if (commandTokens.isEmpty()) return CommandResult.ok()
 
-        val commandName = commandTokens.first().uppercase()
-        val args = commandTokens.drop(1)
+        // DOS acepta el modificador pegado al comando: "DIR/W" es "DIR /W".
+        val firstToken = commandTokens.first()
+        val slash = firstToken.indexOf('/')
+        val commandName = (if (slash > 0) firstToken.substring(0, slash) else firstToken).uppercase()
+        val args = (if (slash > 0) listOf(firstToken.substring(slash)) else emptyList()) + commandTokens.drop(1)
 
         val command = commands[commandName]
-        ?: return CommandResult.error("'$commandName' no se reconoce como un comando interno o externo.")
+            ?: return CommandResult.error("'$commandName' no se reconoce como un comando interno o externo.")
 
-        val result = command.execute(args, context)
+        val result = try {
+            command.execute(args, context)
+        } catch (e: UsageException) {
+            val message = if (e.showSyntax) "${e.message}\nSintaxis: ${command.syntax}" else e.message ?: "Error"
+            return CommandResult.error(message)
+        } catch (e: VirtualFileSystemException) {
+            return CommandResult.error(e.message ?: "Error")
+        }
 
         if (redirection != null && !result.isError && !result.clearScreen) {
             return try {
-                writeRedirectedOutput(redirection, result.output)
+                // A un archivo va la salida completa, sin paginar.
+                writeRedirectedOutput(redirection, result.output + result.pendingLines)
                 CommandResult.ok()
             } catch (e: Exception) {
                 CommandResult.error(e.message ?: "No se pudo escribir en ${redirection.path}")
