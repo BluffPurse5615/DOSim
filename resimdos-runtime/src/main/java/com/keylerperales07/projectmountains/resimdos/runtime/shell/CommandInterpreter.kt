@@ -74,6 +74,13 @@ class CommandInterpreter(private val context: ShellContext) {
         return result
     }
 
+    /**
+     * Respuesta del usuario a "Enter new date:" o "Enter new time:" ([field] es "DATE" o "TIME").
+     * Si el valor no sirve, el resultado trae "Invalid ..." y vuelve a pedirlo.
+     */
+    fun answerClockPrompt(field: String, text: String): CommandResult =
+        (commands[field] as? ClockCommand)?.submit(text, context) ?: CommandResult.ok()
+
     private data class Redirection(val path: String, val append: Boolean)
 
     /** Detecta un ">" o ">>" seguido de un nombre de archivo al final de la línea. */
