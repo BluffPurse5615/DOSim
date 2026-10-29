@@ -26,7 +26,7 @@ data class CommandResult(
     val isError: Boolean get() = errorMessage != null
 
     companion object {
-        const val PRESS_KEY_PROMPT = "Presione una tecla para continuar . . ."
+        const val PRESS_KEY_PROMPT = "Strike a key when ready . . ."
 
         fun ok(vararg lines: String) = CommandResult(output = lines.toList())
         fun error(message: String) = CommandResult(errorMessage = message)
