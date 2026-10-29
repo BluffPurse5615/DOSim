@@ -15,6 +15,10 @@ import com.keylerperales07.projectmountains.resimdos.fs.VirtualFileSystemExcepti
  */
 class CommandInterpreter(private val context: ShellContext) {
 
+    private companion object {
+        const val BAD_COMMAND = "Bad command or file name"
+    }
+
     private val commands: Map<String, Command> = listOf(
         DirCommand(),
         DelCommand(),
@@ -43,7 +47,7 @@ class CommandInterpreter(private val context: ShellContext) {
         val args = (if (slash > 0) listOf(firstToken.substring(slash)) else emptyList()) + commandTokens.drop(1)
 
         val command = commands[commandName]
-            ?: return CommandResult.error("'$commandName' no se reconoce como un comando interno o externo.")
+            ?: return CommandResult.error(BAD_COMMAND)
 
         val result = try {
             command.execute(args, context)
@@ -51,7 +55,10 @@ class CommandInterpreter(private val context: ShellContext) {
             val message = if (e.showSyntax) "${e.message}\nSintaxis: ${command.syntax}" else e.message ?: "Error"
             return CommandResult.error(message)
         } catch (e: VirtualFileSystemException) {
-            return CommandResult.error(e.message ?: "Error")
+            return CommandResult.error(e.message ?: BAD_COMMAND)
+        } catch (e: Exception) {
+            // Cualquier otro fallo al ejecutar un comando se ve igual que en DOS.
+            return CommandResult.error(BAD_COMMAND)
         }
 
         if (redirection != null && !result.isError && !result.clearScreen) {
