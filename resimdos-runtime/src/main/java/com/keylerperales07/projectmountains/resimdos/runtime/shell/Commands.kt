@@ -1,15 +1,23 @@
 package com.keylerperales07.projectmountains.resimdos.runtime.shell
 
 import com.keylerperales07.projectmountains.resimdos.fs.VirtualFileEntry
+import com.keylerperales07.projectmountains.resimdos.fs.VirtualFileSystemException
 import com.keylerperales07.projectmountains.resimdos.fs.VirtualPath
 
 /*
  * Comandos internos de COMMAND.COM para DOS 1.25: DIR, COPY, DEL/ERASE,
  * REN/RENAME, TYPE, DATE, TIME, REM, PAUSE. No hay subdirectorios, así
  * que toda ruta es la raíz de la unidad (ver parseFileSpec).
+ *
+ * Igual que el DOS original, DIR, COPY, DEL, REN y TYPE no explican los
+ * errores de uso: cada uno responde con su mensaje fijo y listo.
  */
 
 private const val CTRL_Z: Byte = 0x1A
+
+private const val MISSING_FILE_NAME = "Missing file name"
+private const val FILE_NOT_FOUND = "File not found"
+private const val DUPLICATE_OR_NOT_FOUND = "Duplicate file name or File not found"
 
 /** Archivos (no carpetas) de la raíz que encajan con [pattern]. */
 private fun filesMatching(pattern: String, context: ShellContext): List<VirtualFileEntry> =
@@ -30,36 +38,51 @@ class DirCommand : Command {
     // solo caben 4 de 12 caracteres separados por 2 espacios.
     private val wideColumns = 4
 
+    private class Request(val pattern: String, val paged: Boolean, val wide: Boolean)
+
     override fun execute(args: List<String>, context: ShellContext): CommandResult {
-        val (switches, files) = splitSwitches(args, setOf('P', 'W'))
-        if (files.size > 1) throw UsageException("Número de parámetros no válido")
+        // Un error de uso no se reporta: DIR responde como si lo hubieran escrito solo.
+        val request = try {
+            parse(args, context)
+        } catch (e: UsageException) {
+            Request("*.*", paged = false, wide = false)
+        }
 
-        val pattern = files.firstOrNull()?.let { parseFileSpec(it, context).pattern }.orEmpty().ifEmpty { "*.*" }
-        val entries = context.drive.listDirectory(VirtualPath.ROOT)
-            .filter { Wildcard.matches(pattern, it.name) }
-        // En un disco vacío "DIR" sí muestra el encabezado; solo falla cuando pidieron algo concreto.
-        if (entries.isEmpty() && pattern != "*.*") return CommandResult.error("Archivo no encontrado")
+        val entries = try {
+            context.drive.listDirectory(VirtualPath.ROOT)
+                .filter { Wildcard.matches(request.pattern, it.name, anyExtensionIfOmitted = true) }
+        } catch (e: VirtualFileSystemException) {
+            return CommandResult.ok(FILE_NOT_FOUND)
+        }
+        // Un disco vacío sí muestra "0 File(s)"; solo falla cuando pidieron algo concreto.
+        if (entries.isEmpty() && request.pattern != "*.*") return CommandResult.ok(FILE_NOT_FOUND)
 
-        val lines = mutableListOf(
-            " Volume in drive ${context.drive.driveLetter} has no label",
-            " Directory of  ${context.drive.driveLetter}:\\",
-            ""
-        )
-        if ('W' in switches) {
+        val lines = mutableListOf<String>()
+        if (request.wide) {
             entries.chunked(wideColumns).forEach { row ->
                 lines.add(row.joinToString("  ") { wideName(it) }.trimEnd())
             }
         } else {
             entries.forEach { lines.add(formatEntry(it)) }
         }
-        lines.add("")
-        lines.add("     ${entries.count { !it.isDirectory }} File(s)   ${context.drive.freeSpaceBytes()} bytes free")
+        lines.add("     ${entries.count { !it.isDirectory }} File(s)")
 
-        return if ('P' in switches) {
+        // DIR /P solo hace pausa cuando la lista no cabe en pantalla.
+        return if (request.paged) {
             CommandResult.paged(lines, (context.screenRows - 2).coerceAtLeast(1))
         } else {
             CommandResult(output = lines)
         }
+    }
+
+    private fun parse(args: List<String>, context: ShellContext): Request {
+        val (switches, files) = splitSwitches(args, setOf('P', 'W'))
+        if (files.size > 1) throw UsageException("Número de parámetros no válido")
+        val pattern = files.firstOrNull()
+            ?.let { parseFileSpec(it, context).pattern }
+            .orEmpty()
+            .ifEmpty { "*.*" }
+        return Request(pattern, paged = 'P' in switches, wide = 'W' in switches)
     }
 
     private fun splitName(entry: VirtualFileEntry): Pair<String, String> {
@@ -72,11 +95,12 @@ class DirCommand : Command {
         return "${base.padEnd(8)} ${ext.padEnd(3)}"
     }
 
+    // Columnas como en DOS 1.25: nombre(8) ext(3) tamaño a la derecha, fecha y hora.
     private fun formatEntry(entry: VirtualFileEntry): String {
         val (base, ext) = splitName(entry)
         val size = if (entry.isDirectory) "<DIR>" else entry.sizeBytes.toString()
-        return "${base.padEnd(8)} ${ext.padEnd(3)}   ${size.padStart(8)}   " +
-                "${formatDate(entry.modifiedAt)}   ${formatTime(entry.modifiedAt)}"
+        return "${base.padEnd(8)} ${ext.padEnd(3)} ${size.padStart(9)}   " +
+                "${formatDate(entry.modifiedAt)}  ${formatTime(entry.modifiedAt)}"
     }
 
     private fun formatDate(epochMillis: Long): String {
@@ -84,7 +108,7 @@ class DirCommand : Command {
         val month = calendar.get(java.util.Calendar.MONTH) + 1
         val day = calendar.get(java.util.Calendar.DAY_OF_MONTH)
         val year = calendar.get(java.util.Calendar.YEAR) % 100
-        return "%d-%02d-%02d".format(month, day, year)
+        return "%2d-%02d-%02d".format(month, day, year)
     }
 
     private fun formatTime(epochMillis: Long): String {
@@ -93,7 +117,7 @@ class DirCommand : Command {
         if (hour == 0) hour = 12
         val minute = calendar.get(java.util.Calendar.MINUTE)
         val amPm = if (calendar.get(java.util.Calendar.AM_PM) == java.util.Calendar.AM) "a" else "p"
-        return "%d:%02d%s".format(hour, minute, amPm)
+        return "%2d:%02d%s".format(hour, minute, amPm)
     }
 }
 
@@ -102,14 +126,23 @@ class DelCommand : Command {
     override val syntax = "DEL [unidad:][ruta]nombre_archivo"
 
     override fun execute(args: List<String>, context: ShellContext): CommandResult {
-        val (_, files) = splitSwitches(args, emptySet())
-        val spec = parseFileSpec(requireOneFile(files), context)
-        if (spec.pattern.isEmpty()) throw UsageException("Falta el nombre del archivo")
+        val pattern = try {
+            val (_, files) = splitSwitches(args, emptySet())
+            val spec = parseFileSpec(requireOneFile(files), context)
+            if (spec.pattern.isEmpty()) throw UsageException("Falta el nombre del archivo")
+            spec.pattern
+        } catch (e: UsageException) {
+            return CommandResult.ok(MISSING_FILE_NAME)
+        }
 
-        val matches = filesMatching(spec.pattern, context)
-        if (matches.isEmpty()) return CommandResult.error("Archivo no encontrado")
-        matches.forEach { context.drive.deleteFile(context.resolvePath(it.name)) }
-        return CommandResult.ok()
+        return try {
+            val matches = filesMatching(pattern, context)
+            if (matches.isEmpty()) return CommandResult.ok(FILE_NOT_FOUND)
+            matches.forEach { context.drive.deleteFile(context.resolvePath(it.name)) }
+            CommandResult.ok()
+        } catch (e: VirtualFileSystemException) {
+            CommandResult.ok(FILE_NOT_FOUND)
+        }
     }
 }
 
@@ -126,32 +159,41 @@ class RenCommand : Command {
     override val syntax = "REN [unidad:][ruta]nombre_actual nombre_nuevo"
 
     override fun execute(args: List<String>, context: ShellContext): CommandResult {
+        val (sourcePattern, newPattern) = try {
+            parseNames(args, context)
+        } catch (e: UsageException) {
+            return CommandResult.ok(MISSING_FILE_NAME)
+        }
+
+        return try {
+            val matches = filesMatching(sourcePattern, context)
+            if (matches.isEmpty()) return CommandResult.ok(DUPLICATE_OR_NOT_FOUND)
+
+            // Se calculan y revisan todos los nombres antes de renombrar el primero,
+            // para no dejar el disco a medias si el tercero choca con otro archivo.
+            val renames = matches.map { it to Wildcard.apply(newPattern, it.name) }
+            val newNames = renames.map { it.second }
+            if (newNames.any { it.isEmpty() }) return CommandResult.ok(MISSING_FILE_NAME)
+            val clash = newNames.any { context.drive.exists(context.resolvePath(it)) } ||
+                    newNames.toSet().size != newNames.size
+            if (clash) return CommandResult.ok(DUPLICATE_OR_NOT_FOUND)
+
+            renames.forEach { (entry, newName) -> context.drive.rename(context.resolvePath(entry.name), newName) }
+            CommandResult.ok()
+        } catch (e: VirtualFileSystemException) {
+            CommandResult.ok(DUPLICATE_OR_NOT_FOUND)
+        }
+    }
+
+    /** Devuelve [patrón origen, patrón nuevo]; cualquier cosa rara es un error de uso. */
+    private fun parseNames(args: List<String>, context: ShellContext): Pair<String, String> {
         val (_, files) = splitSwitches(args, emptySet())
         if (files.size != 2) throw UsageException("Número de parámetros no válido")
-
-        val spec = parseFileSpec(files[0], context)
-        if (spec.pattern.isEmpty()) throw UsageException("Falta el nombre del archivo")
-        val newPattern = files[1]
-        if (newPattern.any { it == ':' || it == '\\' }) {
-            throw UsageException("El nombre nuevo no lleva unidad ni ruta")
-        }
-
-        val matches = filesMatching(spec.pattern, context)
-        if (matches.isEmpty()) return CommandResult.error("Archivo no encontrado")
-
-        // Se calculan y revisan todos los nombres antes de renombrar el primero,
-        // para no dejar el disco a medias si el tercero choca con otro archivo.
-        val renames = matches.map { it to Wildcard.apply(newPattern, it.name) }
-        val newNames = renames.map { it.second }
-        if (newNames.any { it.isEmpty() }) throw UsageException("Nombre nuevo no válido")
-        val clash = newNames.firstOrNull { context.drive.exists(context.resolvePath(it)) }
-            ?: newNames.groupBy { it }.entries.firstOrNull { it.value.size > 1 }?.key
-        if (clash != null) {
-            throw UsageException("Nombre de archivo duplicado o archivo no encontrado: $clash", showSyntax = false)
-        }
-
-        renames.forEach { (entry, newName) -> context.drive.rename(context.resolvePath(entry.name), newName) }
-        return CommandResult.ok()
+        val source = parseFileSpec(files[0], context).pattern
+        if (source.isEmpty()) throw UsageException("Falta el nombre del archivo")
+        val newName = files[1]
+        if (newName.any { it == ':' || it == '\\' }) throw UsageException("Nombre nuevo no válido")
+        return source to newName
     }
 }
 
@@ -168,16 +210,26 @@ class TypeCommand : Command {
     override val syntax = "TYPE [unidad:][ruta]nombre_archivo"
 
     override fun execute(args: List<String>, context: ShellContext): CommandResult {
-        val (_, files) = splitSwitches(args, emptySet())
-        val spec = parseFileSpec(requireOneFile(files), context)
-        if (spec.pattern.isEmpty() || Wildcard.hasWildcard(spec.pattern)) {
-            throw UsageException("Nombre de archivo no válido")
+        return try {
+            val (_, files) = splitSwitches(args, emptySet())
+            val spec = parseFileSpec(requireOneFile(files), context)
+            if (spec.pattern.isEmpty() || Wildcard.hasWildcard(spec.pattern)) {
+                throw UsageException("Nombre de archivo no válido")
+            }
+            var content = context.drive.readFile(context.resolvePath(spec.pattern))
+            // TYPE se detiene en el primer Ctrl+Z, igual que el modo ASCII de COPY.
+            val end = content.indexOf(CTRL_Z)
+            if (end >= 0) content = content.copyOf(end)
+
+            // El salto de línea final del archivo no es una línea más: si se contara,
+            // quedaría una línea en blanco antes del prompt.
+            val lines = String(content).replace("\r", "").split("\n")
+            CommandResult(output = if (lines.last().isEmpty()) lines.dropLast(1) else lines)
+        } catch (e: UsageException) {
+            CommandResult.ok(FILE_NOT_FOUND)
+        } catch (e: VirtualFileSystemException) {
+            CommandResult.ok(FILE_NOT_FOUND)
         }
-        var content = context.drive.readFile(context.resolvePath(spec.pattern))
-        // TYPE se detiene en el primer Ctrl+Z, igual que el modo ASCII de COPY.
-        val end = content.indexOf(CTRL_Z)
-        if (end >= 0) content = content.copyOf(end)
-        return CommandResult(output = String(content).split("\n"))
     }
 }
 
@@ -199,12 +251,30 @@ private class CopyRequest(
  * Ctrl+Z y al destino se le agrega uno al final; en binario no se toca
  * nada. Sin modificadores, concatenar es ASCII y copiar es binario.
  * Los modificadores van separados por espacios.
+ *
+ * Ante cualquier error solo se imprime "# File(s) copied" con los
+ * archivos que alcanzaron a copiarse (normalmente 0).
  */
 class CopyCommand : Command {
     override val name = "COPY"
     override val syntax = "COPY [/A | /B] origen [/A | /B] [destino] [/V]"
 
     override fun execute(args: List<String>, context: ShellContext): CommandResult {
+        val progress = IntArray(1)
+        return try {
+            copy(args, context, progress)
+            CommandResult.ok(copiedText(progress[0]))
+        } catch (e: UsageException) {
+            CommandResult.ok(copiedText(progress[0]))
+        } catch (e: VirtualFileSystemException) {
+            CommandResult.ok(copiedText(progress[0]))
+        }
+    }
+
+    private fun copiedText(count: Int) = "%9d File(s) copied".format(count)
+
+    /** Hace la copia; [progress] va contando los archivos ya escritos por si algo falla a la mitad. */
+    private fun copy(args: List<String>, context: ShellContext, progress: IntArray) {
         val request = parse(args)
         val sourcePatterns = request.sources.map { parseFileSpec(it.text, context).pattern }
         if (sourcePatterns.any { it.isEmpty() }) throw UsageException("Falta el nombre del archivo")
@@ -213,42 +283,41 @@ class CopyCommand : Command {
             ?.let { parseFileSpec(it.text, context).pattern }
             ?.ifEmpty { null }
 
-        // Cada origen (con sus comodines expandidos) como lista de [archivo, modo].
         val concatenating = request.sources.size > 1 ||
                 (destinationPattern != null && !Wildcard.hasWildcard(destinationPattern) &&
                         Wildcard.hasWildcard(sourcePatterns[0]))
         val concatDefault = if (concatenating) CopyMode.ASCII else CopyMode.BINARY
         fun modeOf(file: CopyFile?) = file?.mode ?: request.globalMode ?: concatDefault
 
+        // Cada origen (con sus comodines expandidos) como pareja [archivo, modo].
         val inputs = request.sources.indices.flatMap { index ->
             val found = filesMatching(sourcePatterns[index], context)
-            if (found.isEmpty()) return CommandResult.error("Archivo no encontrado")
+            if (found.isEmpty()) throw UsageException("Archivo no encontrado", showSyntax = false)
             found.map { it.name to modeOf(request.sources[index]) }
         }
         val destinationMode = modeOf(request.destination)
 
-        val copied = if (concatenating) {
+        if (concatenating) {
             if (destinationPattern != null && Wildcard.hasWildcard(destinationPattern)) {
                 throw UsageException("Nombre de archivo no válido")
             }
             val data = inputs.fold(ByteArray(0)) { acc, (name, mode) -> acc + readSource(context, name, mode) }
             write(context, destinationPattern ?: inputs.first().first, data, destinationMode, request.verify)
-            1
+            progress[0] = 1
         } else {
             // Se valida todo antes de escribir: ningún archivo puede caer sobre sí mismo.
             val targets = inputs.map { (name, mode) ->
                 val target = if (destinationPattern == null) name else Wildcard.apply(destinationPattern, name)
                 if (target.equals(name, ignoreCase = true)) {
-                    return CommandResult.error("El archivo no se puede copiar sobre sí mismo")
+                    throw UsageException("El archivo no se puede copiar sobre sí mismo", showSyntax = false)
                 }
                 Triple(name, mode, target)
             }
             targets.forEach { (name, mode, target) ->
                 write(context, target, readSource(context, name, mode), destinationMode, request.verify)
+                progress[0]++
             }
-            targets.size
         }
-        return CommandResult.ok("%9d archivo(s) copiado(s)".format(copied))
     }
 
     private fun parse(args: List<String>): CopyRequest {
