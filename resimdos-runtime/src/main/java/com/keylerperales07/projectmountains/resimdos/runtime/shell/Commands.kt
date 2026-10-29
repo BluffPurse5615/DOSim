@@ -392,7 +392,18 @@ class CopyCommand : Command {
     }
 }
 
-class DateCommand : Command {
+/**
+ * DATE y TIME comparten el mismo trato: sin argumentos muestran el valor
+ * actual y piden uno nuevo; con un valor mal escrito responden
+ * "Invalid ..." y vuelven a pedirlo hasta que sea válido o se pulse Enter.
+ * [submit] sirve tanto para el argumento escrito junto al comando como
+ * para la respuesta a "Enter new ...:".
+ */
+interface ClockCommand : Command {
+    fun submit(text: String, context: ShellContext): CommandResult
+}
+
+class DateCommand : ClockCommand {
     override val name = "DATE"
     override val syntax = "DATE [mm-dd-yy]"
 
@@ -400,14 +411,20 @@ class DateCommand : Command {
         if (args.isEmpty()) {
             return CommandResult.awaitingClock("DATE", "Current date is ${context.clock.dateText}", "Enter new date: ")
         }
-        val value = args.joinToString(" ")
-        if (!DosClockFormat.isValidDate(value)) throw UsageException("Fecha inválida")
-        context.clock.dateText = value
+        return submit(args.joinToString(" "), context)
+    }
+
+    override fun submit(text: String, context: ShellContext): CommandResult {
+        // Enter sin escribir nada deja la fecha como está.
+        if (text.isBlank()) return CommandResult.ok()
+        val date = DosClockFormat.parseDate(text)
+            ?: return CommandResult.awaitingClock("DATE", "Invalid date", "Enter new date: ")
+        context.clock.setDate(date)
         return CommandResult.ok()
     }
 }
 
-class TimeCommand : Command {
+class TimeCommand : ClockCommand {
     override val name = "TIME"
     override val syntax = "TIME [hh:mm[:ss[.cc]]]"
 
@@ -415,9 +432,14 @@ class TimeCommand : Command {
         if (args.isEmpty()) {
             return CommandResult.awaitingClock("TIME", "Current time is ${context.clock.timeText}", "Enter new time: ")
         }
-        val value = args.joinToString(" ")
-        if (!DosClockFormat.isValidTime(value)) throw UsageException("Hora inválida")
-        context.clock.timeText = value
+        return submit(args.joinToString(" "), context)
+    }
+
+    override fun submit(text: String, context: ShellContext): CommandResult {
+        if (text.isBlank()) return CommandResult.ok()
+        val time = DosClockFormat.parseTime(text)
+            ?: return CommandResult.awaitingClock("TIME", "Invalid time", "Enter new time: ")
+        context.clock.setTime(time)
         return CommandResult.ok()
     }
 }
