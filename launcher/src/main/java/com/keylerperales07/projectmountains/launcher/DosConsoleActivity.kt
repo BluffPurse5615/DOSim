@@ -29,15 +29,14 @@ import com.keylerperales07.projectmountains.resimdos.runtime.ProgramRegistry
 import com.keylerperales07.projectmountains.resimdos.runtime.RuntimeExecutionException
 import com.keylerperales07.projectmountains.resimdos.runtime.shell.CommandInterpreter
 import com.keylerperales07.projectmountains.resimdos.runtime.shell.CommandResult
-import com.keylerperales07.projectmountains.resimdos.runtime.shell.DosClockFormat
 import com.keylerperales07.projectmountains.resimdos.runtime.shell.ShellContext
 import java.util.Calendar
 
 /**
  * Consola de ReSim DOS 1.25 como una sola caja de texto continua (sin
  * campo de entrada separado abajo): la fecha/hora se escriben solas,
- * con animación letra por letra, usando la fecha/hora real del
- * dispositivo, y después el usuario escribe pegado al prompt "A>",
+ * con animacion letra por letra, usando la fecha/hora real del
+ * dispositivo, y despues el usuario escribe pegado al prompt "A>",
  * como una terminal real.
  */
 class DosConsoleActivity : Activity() {
@@ -49,12 +48,12 @@ class DosConsoleActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    /** Posición a partir de la cual el texto es "editable" (lo que va después del último prompt). */
+    /** Posicion a partir de la cual el texto es "editable" (lo que va despues del último prompt). */
     private var promptStart = 0
     /** Copia exacta de todo el texto hasta promptStart; si algo la corrompe, se restaura. */
     private var lockedText = ""
     private var isReady = false
-    /** Si DATE o TIME están esperando que la siguiente línea sea el valor nuevo. */
+    /** Si DATE o TIME estan esperando que la siguiente linea sea el valor nuevo. */
     private var pendingClockField: String? = null
     /** Si PAUSE (o una salida paginada) está esperando que el usuario mande cualquier línea para continuar. */
     private var pendingKeyPress = false
@@ -73,7 +72,7 @@ class DosConsoleActivity : Activity() {
 
     /**
      * Fija la densidad de pantalla en un valor constante (DENSITY_DEFAULT,
-     * 160 dpi = "1x") para toda esta Activity, antes de que se cree
+     * 160dpi = "1x") para toda esta Activity, antes de que se cree
      * nada. Así, un dp o un sp del layout siempre se traduce al MISMO
      * número de píxeles reales sin importar el DPI real del teléfono
      * — la interfaz deja de "crecer" o "encogerse" entre dispositivos
@@ -157,7 +156,7 @@ class DosConsoleActivity : Activity() {
             typeface = dosTypeface
             textSize = probeSize
         }
-        // Fuente monospaced: cualquier letra sirve de referencia de ancho.
+        // Fuente monoespaciada: cualquier letra sirve de referencia de ancho.
         val measuredCharWidthAtProbe = paint.measureText("M")
 
         return probeSize * (targetCharWidthPx / measuredCharWidthAtProbe)
@@ -213,6 +212,8 @@ class DosConsoleActivity : Activity() {
         val bootResult = BootSequence(drive, programRegistry, programLoader).boot()
         shellContext = bootResult.shellContext
         interpreter = CommandInterpreter(shellContext)
+        // El reloj de DOS arranca una sola vez con la fecha y hora del teléfono y desde ahí corre solo.
+        shellContext.clock.startFrom(Calendar.getInstance())
 
         appendLine("MS-DOS version 1.25")
         appendLine("Copyright 1981,82 Microsoft, Inc")
@@ -223,13 +224,13 @@ class DosConsoleActivity : Activity() {
 
         val realDate = realDateText()
         typeText(realDate) {
-            shellContext.clock.dateText = realDate
+            interpreter.answerClockPrompt("DATE", realDate)
             appendLine("Current time is ${shellContext.clock.timeText}")
             appendLine("Enter new time: ")
 
             val realTime = realTimeText()
             typeText(realTime) {
-                shellContext.clock.timeText = realTime
+                interpreter.answerClockPrompt("TIME", realTime)
                 appendLine("")
                 bootResult.autoexecOutput.forEach { appendLine(it) }
                 finishBoot()
@@ -296,26 +297,11 @@ class DosConsoleActivity : Activity() {
 
             val field = pendingClockField
             if (field != null) {
-                if (typed.isNotBlank()) {
-                    when (field) {
-                        "DATE" -> {
-                            if (DosClockFormat.isValidDate(typed.trim())) {
-                                shellContext.clock.dateText = typed.trim()
-                            } else {
-                                appendLineRaw("Fecha inválida")
-                            }
-                        }
-                        "TIME" -> {
-                            if (DosClockFormat.isValidTime(typed.trim())) {
-                                shellContext.clock.timeText = typed.trim()
-                            } else {
-                                appendLineRaw("Hora inválida")
-                            }
-                        }
-                    }
-                }
                 pendingClockField = null
-                printPromptRaw()
+                val answer = interpreter.answerClockPrompt(field, typed)
+                answer.output.forEach { appendLineRaw(it) }
+                // Un valor inválido imprime "Invalid ..." y vuelve a pedirlo.
+                if (answer.awaitingClockField != null) pendingClockField = answer.awaitingClockField else printPromptRaw()
                 return
             }
 
@@ -381,7 +367,7 @@ class DosConsoleActivity : Activity() {
         }
     }
 
-    /** Filas de texto que caben ahora mismo en la consola; DIR /P página con este número. */
+    /** Filas de texto que caben ahora mismo en la consola; DIR /P pagina con este número. */
     private fun visibleRows(): Int {
         val usableHeight = consoleView.height - consoleView.totalPaddingTop - consoleView.totalPaddingBottom
         val rowHeight = consoleView.lineHeight
