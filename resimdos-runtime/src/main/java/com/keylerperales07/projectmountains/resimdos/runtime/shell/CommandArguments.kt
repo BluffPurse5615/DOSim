@@ -62,10 +62,17 @@ internal object Wildcard {
 
     fun hasWildcard(text: String): Boolean = text.any { it == '*' || it == '?' }
 
-    fun matches(pattern: String, name: String): Boolean {
-        val (patternName, patternExt) = split(normalize(pattern))
+    /**
+     * Con [anyExtensionIfOmitted] un patrón sin punto ("CHKDSK") busca ese nombre con
+     * cualquier extensión, que es lo que hace DIR. DEL, REN y TYPE lo dejan apagado:
+     * ahí "CHKDSK" es solo el archivo sin extensión.
+     */
+    fun matches(pattern: String, name: String, anyExtensionIfOmitted: Boolean = false): Boolean {
+        val normalized = normalize(pattern)
+        val (patternName, patternExt) = split(normalized)
+        val ext = if (anyExtensionIfOmitted && '.' !in normalized) "*" else patternExt
         val (realName, realExt) = split(name.uppercase())
-        return fieldMatches(patternName, realName) && fieldMatches(patternExt, realExt)
+        return fieldMatches(patternName, realName) && fieldMatches(ext, realExt)
     }
 
     /** Nombre que resulta de aplicar un patrón destino (REN *.TXT *.BAK) a un archivo origen. */
