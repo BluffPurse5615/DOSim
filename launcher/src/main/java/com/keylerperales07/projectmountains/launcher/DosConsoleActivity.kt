@@ -324,6 +324,8 @@ class DosConsoleActivity : Activity() {
                 return
             }
 
+            // Cada comando empieza sin páginas heredadas de uno anterior.
+            pendingLines.clear()
             shellContext.screenRows = visibleRows()
             val result = interpreter.execute(typed)
 
@@ -367,7 +369,7 @@ class DosConsoleActivity : Activity() {
         }
 
         if (resolved == null) {
-            appendLineRaw(originalError ?: "'$commandName' no se reconoce como un comando interno o externo.")
+            appendLineRaw(originalError ?: "Bad command or file name")
             return
         }
 
@@ -406,6 +408,11 @@ class DosConsoleActivity : Activity() {
 
     /** Como printPrompt, pero sin tocar `guard` (para usarse dentro de un bloque que ya lo maneja). */
     private fun printPromptRaw() {
+        // El prompt va justo debajo de la última línea: nunca se deja una línea vacía de por medio.
+        val text = consoleView.text
+        var end = text.length
+        while (end > promptStart && text[end - 1] == '\n') end--
+        if (end < text.length) text.delete(end, text.length)
         consoleView.append("\n${promptText()}")
     }
 
