@@ -306,7 +306,8 @@ class DosConsoleActivity : Activity() {
             }
 
             if (typed.isBlank()) {
-                printPromptRaw()
+                // Enter sin comando: el prompt baja una línea, sin espacio en blanco.
+                printPromptRaw(blankLineBefore = false)
                 return
             }
 
@@ -393,13 +394,15 @@ class DosConsoleActivity : Activity() {
     }
 
     /** Como printPrompt, pero sin tocar `guard` (para usarse dentro de un bloque que ya lo maneja). */
-    private fun printPromptRaw() {
-        // El prompt va justo debajo de la última línea: nunca se deja una línea vacía de por medio.
+    private fun printPromptRaw(blankLineBefore: Boolean = true) {
+        // Se parte siempre de la última línea con texto, sin importar cuántas líneas vacías
+        // dejó el comando o el programa, para que el espacio antes del prompt sea siempre el mismo:
+        // una línea en blanco tras cada comando o programa, y ninguna si solo se pulsó Enter.
         val text = consoleView.text
         var end = text.length
         while (end > promptStart && text[end - 1] == '\n') end--
         if (end < text.length) text.delete(end, text.length)
-        consoleView.append("\n${promptText()}")
+        consoleView.append(if (blankLineBefore) "\n\n${promptText()}" else "\n${promptText()}")
     }
 
     private fun appendLine(line: String) {
