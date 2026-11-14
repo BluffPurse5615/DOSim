@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.keylerperales07.projectmountains.launcher">
 
+    <queries>
+        <package android:name="com.keylerperales07.projectmountains.companion" />
+    </queries>
+    
     <application
         android:name=".ReSimApplication"
         android:allowBackup="true"
@@ -21,6 +25,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
+        <meta-data
+            android:name="companion.cert"
+            android:value="${companionCert}" />
     </application>
 </manifest>
