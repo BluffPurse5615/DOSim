@@ -43,6 +43,8 @@ jobs:
           gradle-version: '9.6.0'
 
       - name: Build debug APK and run Android Lint
+        env:
+          COMPANION_CERT: ${{ secrets.COMPANION_CERT }}
         run: gradle --no-daemon --stacktrace :launcher:assembleDebug :launcher:lintDebug
 
       - name: Upload debug APK
@@ -61,4 +63,3 @@ jobs:
           path: launcher/build/reports/lint-results-debug.*
           if-no-files-found: ignore
           retention-days: 14
-          
