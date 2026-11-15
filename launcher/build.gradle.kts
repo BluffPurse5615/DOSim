@@ -19,6 +19,10 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            // huella SHA-256 de la app complementaria que se permite cargar; vacía = no se carga nada
+            manifestPlaceholders["companionCert"] = "sha256:" + (System.getenv("COMPANION_CERT") ?: "")
+        }
         getByName("release") {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
