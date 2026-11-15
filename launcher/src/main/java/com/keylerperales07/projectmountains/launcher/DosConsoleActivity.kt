@@ -87,6 +87,7 @@ class DosConsoleActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CompanionLoader.attach(application)
         requestWindowFeature(Window.FEATURE_NO_TITLE)
         setupUi()
         enableFullscreen()
