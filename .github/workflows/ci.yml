@@ -1,3 +1,4 @@
+
 name: DOSim CI
 
 on:
@@ -42,10 +43,67 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
+      # Recuperar la firma personalizada para Debug.
+      - name: Restore custom Debug signing key
+        if: github.event_name != 'pull_request'
+        env:
+          SIGNING_KEY_BASE64: ${{ secrets.SIGNING_KEY_BASE64 }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          values=(
+            "$SIGNING_KEY_BASE64"
+            "$KEY_STORE_PASSWORD"
+            "$KEY_ALIAS"
+            "$KEY_PASSWORD"
+          )
+
+          configured=0
+          missing=0
+
+          for value in "${values[@]}"; do
+            if [ -n "$value" ]; then
+              configured=$((configured + 1))
+            else
+              missing=$((missing + 1))
+            fi
+          done
+
+          if [ "$configured" -eq 0 ]; then
+            echo "::warning::Custom signing secrets are not configured. Using the standard Android Debug key."
+            exit 0
+          fi
+
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::Custom signing is partially configured. Add all four signing secrets."
+            exit 1
+          fi
+
+          key_file="$RUNNER_TEMP/dosim-signing.jks"
+
+          printf '%s' "$SIGNING_KEY_BASE64" |
+            base64 --decode > "$key_file"
+
+          test -s "$key_file"
+
+          {
+            echo "SIGNING_STORE_FILE=$key_file"
+            echo "KEY_STORE_PASSWORD=$KEY_STORE_PASSWORD"
+            echo "KEY_ALIAS=$KEY_ALIAS"
+            echo "KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      # Compilar APK Debug y ejecutar Lint.
       - name: Build debug APK and run Android Lint
         env:
           COMPANION_CERT: ${{ secrets.COMPANION_CERT }}
-        run: gradle --no-daemon --stacktrace :launcher:assembleDebug :launcher:lintDebug
+        run: |
+          gradle --no-daemon --stacktrace \
+            :launcher:assembleDebug \
+            :launcher:lintDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
