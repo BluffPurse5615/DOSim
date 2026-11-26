@@ -1,6 +1,7 @@
 package com.keylerperales07.projectmountains.resimdos.runtime
 
 import com.keylerperales07.projectmountains.resimdos.fs.VirtualFileSystemException
+import com.keylerperales07.projectmountains.resimdos.runtime.asm.AsmProgram
 import com.keylerperales07.projectmountains.resimdos.runtime.shell.ShellContext
 
 /**
@@ -14,8 +15,11 @@ import com.keylerperales07.projectmountains.resimdos.runtime.shell.ShellContext
  *   línea por línea igual que un .BAT, saltándose esa línea de
  *   declaración. Así cualquier archivo, aunque su extensión sea
  *   .COM, se puede escribir como texto con comandos reales.
- *   Si no trae esa declaración, se busca en [ProgramRegistry]; si no
- *   está registrado, se usa un programa genérico de respaldo (ver
+ *   Si dice "FILETYPE=ASM", el texto es un programa en lenguaje
+ *   ensamblador y lo corre [AsmProgram]; la extensión decide el
+ *   modelo de memoria (.COM o .EXE).
+ *   Si no trae ninguna declaración, se busca en [ProgramRegistry]; si
+ *   no está registrado, se usa un programa genérico de respaldo (ver
  *   [ProgramRegistry.create]).
  */
 class ProgramLoader(
@@ -59,20 +63,29 @@ class ProgramLoader(
             }
 
             val content = readTextOrThrow(path, shellContext)
-            if (declaresBatchType(content)) {
-                return BatchProgram(stripBatchHeader(content), this, fileName)
+            when (declaredType(content)) {
+                DeclaredType.BAT -> return BatchProgram(stripBatchHeader(content), this, fileName)
+                // El texto ASM se entrega completo, con su línea de cabecera: así los
+                // errores del parser citan el mismo número de línea que ve el usuario.
+                DeclaredType.ASM -> return AsmProgram(content, format)
+                null -> return programRegistry.create(path)
             }
-            return programRegistry.create(path)
         }
 
         throw RuntimeExecutionException.UnsupportedFormatException(path)
     }
 
-    /** La primera línea del archivo dice, sin importar mayúsculas ni espacios, "FILETYPE=BAT". */
-    private fun declaresBatchType(content: String): Boolean {
-        val firstLine = content.lineSequence().firstOrNull() ?: return false
-        val normalized = firstLine.replace(" ", "").uppercase()
-        return normalized == "FILETYPE=BAT"
+    /** Lo que el archivo declara en su primera línea con FILETYPE=. */
+    private enum class DeclaredType { BAT, ASM }
+
+    /** Lee la primera línea (sin importar mayúsculas ni espacios) y dice qué tipo declara, o null si no declara ninguno. */
+    private fun declaredType(content: String): DeclaredType? {
+        val firstLine = content.lineSequence().firstOrNull() ?: return null
+        return when (firstLine.replace(" ", "").uppercase()) {
+            "FILETYPE=BAT" -> DeclaredType.BAT
+            "FILETYPE=ASM" -> DeclaredType.ASM
+            else -> null
+        }
     }
 
     /** Quita la línea de declaración "FILETYPE=BAT", dejando solo los comandos reales. */
