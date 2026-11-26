@@ -4,9 +4,27 @@ Todos los cambios notables de este proyecto se documentan en este archivo.
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Todavía no hay versiones publicadas formalmente (el proyecto está en Alpha interna), así que por ahora todo vive bajo **[Sin publicar]**.
 
-## [0.1.0-alpha] — MS-DOS 1.25, Alpha interna
+## [0.2.0-alpha] - 2026-11-26
 
-### Added
+### Cambios
+- Comandos internos de COMMAND.COM alineados con MS-DOS 1.25, con sus mensajes en inglés.
+- `DIR [/P] [/W]`: sin encabezado, lista solo archivos y termina con `# File(s)`. `DIR NOMBRE` sin extensión muestra todas las extensiones. `/P` pagina solo si la lista supera la pantalla, en cada invocación (`Strike a key when ready . . .`).
+- `COPY [/A|/B] origen [/A|/B] [destino] [/V]` con concatenación por `+`. Ante cualquier error imprime solo `# File(s) copied`.
+- `DEL`/`ERASE`: `Missing file name` o `File not found`.
+- `REN`/`RENAME`: `Missing file name` o `Duplicate file name or File not found`.
+- `TYPE`: cualquier error muestra `File not found`.
+- `DATE [mm-dd-yy]` y `TIME [hh:mm[:ss[.cc]]]`: texto inicial como el original; un valor inválido muestra `Invalid date` / `Invalid time` y vuelve a pedirlo.
+- Cualquier error al ejecutar un comando muestra `Bad command or file name`.
+- Queda una línea en blanco antes del prompt tras cualquier comando o programa, incluidos `DEL` y `REN`. `DEL`, `REN` y `TYPE` ya no dejan una línea extra.
+
+### Corregido
+- El reloj de DOS corre solo y ya no queda fijo.
+- `COPY` ya no permite copiar un archivo sobre sí mismo.
+- `DATE` y `TIME` validan el formato también al responder `Enter new date:` / `Enter new time:`.
+
+## [0.1.0-alpha] — 2026-10-15
+
+### Añadido
 
 **Arquitectura base**
 - Motor `ReSimCore`: monta y administra unidades virtuales
@@ -33,7 +51,7 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). To
 - Modo "anti-DPI": la interfaz usa siempre la misma densidad de referencia, así que no cambia de tamaño entre dispositivos de distinto DPI
 - Manejador de crashes propio (`CrashHandler`), que guarda el último error para poder revisarlo sin depender de herramientas externas
 
-### Changed
+### Cambios
 
 - Rebase completo a **MS-DOS 1.25 real** (ver sección dedicada más abajo) — cambió la unidad (`A:` en vez de `C:`), el prompt (`A:`), la ausencia de subdirectorios, y la lista completa de comandos
 - `resimdos-shell` y `resimdos-api` se fusionaron dentro de `resimdos-runtime`
@@ -42,7 +60,7 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). To
 - La app arranca directo en la consola de DOS, sin pasar por la pantalla de selección de sistemas
 - `COMMAND.COM` es texto plano con comandos reales de DOS 1.25 (se evaluó usar el binario real de MS-DOS, pero se descartó a favor de que el motor lo ejecute de verdad)
 
-### Fixed
+### Corregido
 
 - Crash al usar `DATE`/`TIME` una segunda vez (la respuesta a "Enter new time:" se interpretaba como un comando nuevo en vez de como respuesta)
 - `VirtualDrive` no encontraba archivos reales si su mayúscula/minúscula no coincidía exactamente con la ruta DOS
