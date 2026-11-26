@@ -7,60 +7,46 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// Firma Debug personalizada:
-// - Android Studio/local: keystore.properties en la raíz del proyecto.
-// - GitHub Actions: variables de entorno configuradas por ci.yml.
-val keystorePropertiesFile = rootProject.file("keystore.properties")
-val keystoreProperties = Properties().apply {
-    if (keystorePropertiesFile.isFile) {
-        keystorePropertiesFile.inputStream().use { load(it) }
+// Release signing is configured locally through keystore.properties,
+// or in CI through RELEASE_* environment variables.
+// Debug intentionally keeps Android's standard debug.keystore signing.
+val releaseSigningProperties = Properties().apply {
+    val propertiesFile = rootProject.file("keystore.properties")
+    if (propertiesFile.isFile) {
+        propertiesFile.inputStream().use { load(it) }
     }
 }
 
-val environmentSigningValues = listOf(
-    System.getenv("SIGNING_STORE_FILE"),
-    System.getenv("KEY_STORE_PASSWORD"),
-    System.getenv("KEY_ALIAS"),
-    System.getenv("KEY_PASSWORD")
+fun releaseSigningValue(environmentVariable: String, propertyName: String): String? =
+    System.getenv(environmentVariable)?.takeIf { it.isNotBlank() }
+        ?: releaseSigningProperties.getProperty(propertyName)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = releaseSigningValue("RELEASE_STORE_FILE", "storeFile")
+val releaseStorePassword = releaseSigningValue("RELEASE_STORE_PASSWORD", "storePassword")
+val releaseKeyAlias = releaseSigningValue("RELEASE_KEY_ALIAS", "keyAlias")
+val releaseKeyPassword = releaseSigningValue("RELEASE_KEY_PASSWORD", "keyPassword")
+
+val releaseSigningValues = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
 )
 
-val hasEnvironmentSigning =
-    environmentSigningValues.any { !it.isNullOrBlank() }
+val hasReleaseSigning = releaseSigningValues.all { !it.isNullOrBlank() }
 
-val localSigningValues = listOf(
-    keystoreProperties.getProperty("storeFile"),
-    keystoreProperties.getProperty("storePassword"),
-    keystoreProperties.getProperty("keyAlias"),
-    keystoreProperties.getProperty("keyPassword")
-)
-
-// Las variables de entorno tienen prioridad. Si no se usan, se carga
-// keystore.properties. Así se evita mezclar valores de dos almacenes.
-val selectedSigningValues = when {
-    hasEnvironmentSigning -> environmentSigningValues
-    keystorePropertiesFile.isFile -> localSigningValues
-    else -> emptyList()
-}
-
-val hasCustomDebugSigning =
-    selectedSigningValues.size == 4 &&
-            selectedSigningValues.all { !it.isNullOrBlank() }
-
-// No continuar con una configuración de firma incompleta.
+// Detect an incomplete Release configuration instead of silently
+// producing an APK with the wrong signing identity.
 if (
-    (hasEnvironmentSigning || keystorePropertiesFile.isFile) &&
-    !hasCustomDebugSigning
+    releaseSigningValues.any { !it.isNullOrBlank() } &&
+    !hasReleaseSigning
 ) {
     throw GradleException(
-        "Custom Debug signing is incomplete. Provide storeFile, " +
-                "storePassword, keyAlias and keyPassword."
+        "Release signing is partially configured. Provide storeFile, " +
+                "storePassword, keyAlias and keyPassword in keystore.properties " +
+                "or all four RELEASE_* environment variables."
     )
 }
-
-val signingStoreFilePath = selectedSigningValues.getOrNull(0)
-val signingStorePassword = selectedSigningValues.getOrNull(1)
-val signingKeyAlias = selectedSigningValues.getOrNull(2)
-val signingKeyPassword = selectedSigningValues.getOrNull(3)
 
 android {
     namespace = "com.keylerperales07.projectmountains.launcher"
@@ -75,27 +61,23 @@ android {
     }
 
     signingConfigs {
-        if (hasCustomDebugSigning) {
-            create("customDebug") {
-                storeFile = rootProject.file(signingStoreFilePath!!)
-                storePassword = signingStorePassword!!
-                keyAlias = signingKeyAlias!!
-                keyPassword = signingKeyPassword!!
+        if (hasReleaseSigning) {
+            create("customRelease") {
+                storeFile = rootProject.file(releaseStoreFile!!)
+                storeType = "PKCS12"
+                storePassword = releaseStorePassword!!
+                keyAlias = releaseKeyAlias!!
+                keyPassword = releaseKeyPassword!!
             }
         }
     }
 
     buildTypes {
         getByName("debug") {
-            // Huella SHA-256 de la app complementaria.
-            // Vacía = no se carga ninguna app complementaria.
+            // Debug uses Android's standard debug keystore automatically.
+            // The companion certificate remains an independent manifest value.
             manifestPlaceholders["companionCert"] =
                 "sha256:" + (System.getenv("COMPANION_CERT") ?: "")
-
-            // Firma Debug personalizada cuando está configurada.
-            if (hasCustomDebugSigning) {
-                signingConfig = signingConfigs.getByName("customDebug")
-            }
         }
 
         getByName("release") {
@@ -104,12 +86,40 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("customRelease")
+            }
         }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
+    }
+}
+
+// Do not allow an unsigned Release package if the keystore is missing.
+val launcherProjectPath = project.path
+gradle.taskGraph.whenReady {
+    // The TaskExecutionGraph is the lambda receiver, so allTasks is used directly.
+    val releasePackagingRequested = allTasks.any { task ->
+        task.path.startsWith("$launcherProjectPath:") &&
+                task.name.contains("release", ignoreCase = true) &&
+                (
+                        task.name.startsWith("assemble", ignoreCase = true) ||
+                                task.name.startsWith("bundle", ignoreCase = true) ||
+                                task.name.startsWith("package", ignoreCase = true) ||
+                                task.name.startsWith("install", ignoreCase = true)
+                        )
+    }
+
+    if (releasePackagingRequested && !hasReleaseSigning) {
+        throw GradleException(
+            "Release signing is not configured. Add keystore.properties " +
+                    "or set the four RELEASE_* environment variables before " +
+                    "building or running the Release variant."
+        )
     }
 }
 
