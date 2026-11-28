@@ -1,7 +1,15 @@
 package com.keylerperales07.projectmountains.resimdos.runtime.asm
 
-/** Qué hace el bucle de ejecución después de una instrucción. */
-internal enum class Flow { CONTINUE, TERMINATE }
+/**
+ * Qué hace el bucle de ejecución después de una instrucción.
+ *
+ * [NEEDS_KEY] y [IDLE] suspenden el programa para que la consola pueda
+ * recibir teclas, pero se diferencian en dónde se sigue al reanudar:
+ * con NEEDS_KEY la instrucción no pudo completarse y se REPITE entera;
+ * con IDLE ya se completó (era una consulta como "¿hay tecla?") y se
+ * sigue con la siguiente.
+ */
+internal enum class Flow { CONTINUE, TERMINATE, NEEDS_KEY, IDLE }
 
 /**
  * Ejecuta una [Instruction] sobre la [Machine]. Aquí vive lo que cada
@@ -40,7 +48,10 @@ internal class InstructionExecutor(
             }
             Op.INT -> {
                 val number = (operands[0] as Operand.Immediate).value
-                return interrupts.handle(number, instruction.line)
+                val flow = interrupts.handle(number, instruction.line)
+                // Sin tecla no hay resultado que guardar: al reanudar se vuelve a ejecutar este mismo INT.
+                if (flow == Flow.NEEDS_KEY) machine.ip = instruction.address
+                return flow
             }
         }
         return Flow.CONTINUE
