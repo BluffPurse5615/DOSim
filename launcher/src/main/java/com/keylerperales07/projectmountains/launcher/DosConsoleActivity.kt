@@ -26,6 +26,7 @@ import com.keylerperales07.projectmountains.resimdos.runtime.EnvironmentManager
 import com.keylerperales07.projectmountains.resimdos.runtime.ProcessManager
 import com.keylerperales07.projectmountains.resimdos.runtime.ProgramLoader
 import com.keylerperales07.projectmountains.resimdos.runtime.ProgramRegistry
+import com.keylerperales07.projectmountains.resimdos.runtime.ProgramSession
 import com.keylerperales07.projectmountains.resimdos.runtime.RuntimeExecutionException
 import com.keylerperales07.projectmountains.resimdos.runtime.shell.CommandInterpreter
 import com.keylerperales07.projectmountains.resimdos.runtime.shell.CommandResult
@@ -59,6 +60,8 @@ class DosConsoleActivity : Activity() {
     private var pendingKeyPress = false
     /** Líneas de una salida paginada (DIR /P) que todavía no se mostraron. */
     private val pendingLines = ArrayDeque<String>()
+    /** Programa que se detuvo a esperar teclas; mientras exista, cada línea enviada es entrada para él y no un comando. */
+    private var activeSession: ProgramSession? = null
     /** Evita que nuestros propios appends disparen el detector de "Enter" del usuario. */
     private var guard = false
 
@@ -285,6 +288,12 @@ class DosConsoleActivity : Activity() {
     private fun handleSubmittedLine(typed: String) {
         guard = true
         try {
+            val waiting = activeSession
+            if (waiting != null) {
+                continueProgram(waiting, typed)
+                return
+            }
+
             if (pendingKeyPress) {
                 pendingKeyPress = false
                 if (pendingLines.isNotEmpty()) {
@@ -335,6 +344,8 @@ class DosConsoleActivity : Activity() {
 
             when {
                 result.awaitingClockField != null -> pendingClockField = result.awaitingClockField
+                // Un programa esperando teclas se queda con la línea: el prompt de DOS volverá cuando termine.
+                activeSession != null -> Unit
                 result.awaitingKeyPress -> pendingKeyPress = true
                 else -> printPromptRaw()
             }
@@ -344,6 +355,36 @@ class DosConsoleActivity : Activity() {
             lockedText = consoleView.text.toString()
             scrollToBottom()
         }
+    }
+
+    /**
+     * Muestra lo que el programa imprimió hasta ahora. Si quedó esperando
+     * una tecla, lo que dejó escrito sin salto de línea (su prompt) se
+     * pone en una línea nueva y el cursor queda justo después: el usuario
+     * escribe ahí, y esa línea será la entrada del programa.
+     */
+    private fun showProgramProgress(session: ProgramSession) {
+        session.takeOutput().forEach { appendLineRaw(it) }
+
+        if (session.isWaitingForKey) {
+            appendLineRaw(session.takePrompt())
+            activeSession = session
+        } else {
+            activeSession = null
+        }
+    }
+
+    /** Entrega la línea tecleada al programa que espera y muestra lo que hace después. */
+    private fun continueProgram(session: ProgramSession, typed: String) {
+        // El teclado de Android no tiene Ctrl-C: escribir "^C" y Enter hace de salida de emergencia.
+        if (typed.trim() == "^C") {
+            session.abort()
+        } else {
+            session.supplyLine(typed)
+        }
+
+        showProgramProgress(session)
+        if (!session.isWaitingForKey) printPromptRaw()
     }
 
     /** Si COMMAND.COM no reconoció la línea como comando interno, se busca por PATH y se prueba como programa. */
@@ -362,8 +403,8 @@ class DosConsoleActivity : Activity() {
         }
 
         try {
-            val process = programLoader.execute(resolved, args, shellContext)
-            process.output.forEach { appendLineRaw(it) }
+            val session = programLoader.launch(resolved, args, shellContext)
+            showProgramProgress(session)
         } catch (e: RuntimeExecutionException) {
             appendLineRaw(e.message ?: "Error al ejecutar $commandName")
         }
