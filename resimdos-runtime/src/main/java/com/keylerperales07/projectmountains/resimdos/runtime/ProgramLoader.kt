@@ -49,6 +49,30 @@ class ProgramLoader(
         return processManager.get(process.pid)!!
     }
 
+    /**
+     * Como [execute], pero el programa puede detenerse a esperar el
+     * teclado: devuelve una [ProgramSession] que, si queda esperando
+     * ([ProgramSession.isWaitingForKey]), la consola retoma con cada
+     * línea que escribe el usuario. La usa la consola; los .BAT siguen
+     * llamando a [execute] porque nadie puede teclear dentro de un lote.
+     */
+    fun launch(path: String, args: List<String>, shellContext: ShellContext): ProgramSession {
+        val process = processManager.start(path)
+        val context = ProcessContext(args, shellContext)
+
+        val program = try {
+            resolveProgram(path, shellContext)
+        } catch (e: Exception) {
+            context.writeLine(e.message ?: "Error")
+            processManager.finish(process.pid, exitCode = 1, output = context.collectedOutput())
+            return ProgramSession(processManager, process, null, context)
+        }
+
+        val session = ProgramSession(processManager, process, program, context)
+        session.begin()
+        return session
+    }
+
     private fun resolveProgram(path: String, shellContext: ShellContext): VirtualProgram {
         val format = ProgramFormat.fromPath(path)
         val fileName = path.substringAfterLast('\\')
